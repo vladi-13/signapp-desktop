@@ -1,93 +1,121 @@
+// src/pages/CameraSTT.tsx
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api/client";
-
-function dataURLtoBase64(dataURL: string) {
-  return dataURL.split(",")[1] || "";
-}
 
 export default function CameraSTT() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [transcript, setTranscript] = useState<string>("Pausado");
+  const [frame, setFrame] = useState<string>("");
+  const [history, setHistory] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
-  const [transcript, setTranscript] = useState<string>("");
-  const [latency, setLatency] = useState<number | null>(null);
+  const [backendAlive, setBackendAlive] = useState<boolean | null>(null);
 
+  const runningRef = useRef(false);
+
+  // Health check
   useEffect(() => {
-    (async () => {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, frameRate: { ideal: 30 } }, audio: false,
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+    const check = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:8000/health");
+        setBackendAlive(res.ok);
+      } catch {
+        setBackendAlive(false);
       }
-    })();
-    return () => {
-      const v = videoRef.current;
-      if (v?.srcObject) (v.srcObject as MediaStream).getTracks().forEach(t => t.stop());
     };
+    check();
+    const id = setInterval(check, 5000);
+    return () => clearInterval(id);
   }, []);
 
-  async function captureAndSend() {
-    const v = videoRef.current, c = canvasRef.current;
-    if (!v || !c) return;
-    const ctx = c.getContext("2d"); if (!ctx) return;
-    c.width = v.videoWidth; c.height = v.videoHeight;
-
-    const frames: string[] = [];
-    for (let i = 0; i < 24; i++) { // ~1s
-      ctx.drawImage(v, 0, 0, c.width, c.height);
-      const dataURL = c.toDataURL("image/jpeg", 0.7);
-      frames.push(dataURLtoBase64(dataURL));
-      await new Promise(r => setTimeout(r, 1000 / 24));
+  // Polling
+  useEffect(() => {
+    if (!running) {
+      setTranscript("Pausado");
+      setFrame("");
+      setHistory([]);
+      return;
     }
 
-    const t0 = performance.now();
-    const { ok, data, error } = await api.signToText(frames);
-    const t1 = performance.now();
+    let stop = false;
+    const poll = async () => {
+      while (!stop && runningRef.current) {
+        try {
+          const res = await fetch("http://127.0.0.1:8000/current");
+          const data = await res.json();
 
-    if (ok && data) {
-      setTranscript(data.text ?? "");
-      setLatency(data.latency_ms ?? Math.round(t1 - t0));
-    } else {
-      setTranscript(""); setLatency(null);
-      alert("Error en sign-to-text: " + (error || "desconocido"));
-    }
-  }
+          setTranscript(data.text || "Pausado");
+          setFrame(data.frame ? `data:image/jpeg;base64,${data.frame}` : "");
+          setHistory(data.history || []);
+        } catch (err) {
+          console.error("Polling error:", err);
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+    };
+    poll();
+    return () => { stop = true; };
+  }, [running]);
+
+  const toggle = async () => {
+    const next = !running;
+    setRunning(next);
+    runningRef.current = next;
+    await fetch(next ? "http://127.0.0.1:8000/start" : "http://127.0.0.1:8000/stop");
+  };
+
+  const clear = async () => {
+    await fetch("http://127.0.0.1:8000/clear");
+    setHistory([]);
+  };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-4">
       <div className="grid md:grid-cols-2 gap-6">
+        {/* Video */}
         <div className="bg-white rounded-2xl shadow-soft p-4 border">
-          <div className="text-sm font-semibold text-slate-700 mb-2">Cámara</div>
+          <div className="text-sm font-semibold text-slate-700 mb-2">Cámara (procesada por backend)</div>
           <div className="aspect-video bg-slate-100 rounded-xl overflow-hidden">
-            <video ref={videoRef} className="w-full h-full object-cover" />
+            {frame ? (
+              <img src={frame} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-slate-500">
+                Sin señal
+              </div>
+            )}
           </div>
-          <div className="mt-4 flex items-center gap-3">
+
+          <div className="mt-4 flex gap-3">
             <button
-              onClick={async () => { setRunning(true); await captureAndSend(); setRunning(false); }}
-              disabled={running}
-              className="px-4 py-2 rounded-xl bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+              onClick={toggle}
+              className={`px-4 py-2 rounded-xl text-white font-medium ${
+                running ? "bg-red-600 hover:bg-red-700" : "bg-brand-600 hover:bg-brand-700"
+              }`}
             >
-              {running ? "Procesando..." : "Capturar y transcribir"}
+              {running ? "Detener" : "Iniciar"}
             </button>
             <button
-              onClick={() => { setTranscript(""); setLatency(null); }}
-              className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300"
+              onClick={clear}
+              className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800"
             >
               Limpiar
             </button>
+            <div className="text-xs text-slate-500 flex items-center">
+              Backend: {backendAlive === null ? "..." : backendAlive ? "Conectado" : "Desconectado"}
+            </div>
           </div>
-          <canvas ref={canvasRef} className="hidden" />
         </div>
 
+        {/* Resultado */}
         <div className="bg-white rounded-2xl shadow-soft p-4 border">
-          <div className="text-sm font-semibold text-slate-700 mb-2">Transcripción</div>
-          <div className="min-h-[200px] rounded-xl border bg-slate-50 p-4 text-slate-700">
-            {transcript || <span className="text-slate-400">Sin resultados todavía…</span>}
+          <div className="text-sm font-semibold text-slate-700 mb-2">Signo detectado</div>
+          <div className="min-h-[200px] rounded-xl border bg-slate-50 p-4 text-slate-700 text-lg font-medium">
+            <div className="font-bold text-green-600">{transcript}</div>
+            {history.length > 1 && (
+              <div className="text-sm text-slate-600 mt-3">
+                {history.join(" → ")}
+              </div>
+            )}
           </div>
-          <div className="mt-3 text-xs text-slate-500">
-            {latency != null ? `Latencia: ${latency} ms` : ""}
+          <div className="mt-2 text-[10px] text-slate-400">
+            * Reconocimiento en tiempo real con MediaPipe + LSTM (Python)
           </div>
         </div>
       </div>

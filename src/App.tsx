@@ -1,3 +1,4 @@
+// src/App.tsx
 import { useEffect, useState } from "react";
 import { NavTabs } from "./components/NavTabs";
 import CameraSTT from "./pages/CameraSTT";

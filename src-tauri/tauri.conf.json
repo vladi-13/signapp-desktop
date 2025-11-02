@@ -3,24 +3,35 @@
   "productName": "desktop-app",
   "version": "0.1.0",
   "identifier": "com.vladi.signapp",
+
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
+
   "app": {
     "windows": [
       {
-        "title": "desktop-app",
-        "width": 800,
-        "height": 600
+        "title": "Sign Language Recognition",
+        "width": 1280,
+        "height": 720,
+        "resizable": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; connect-src *; media-src 'self' blob:; img-src 'self' data:"
     }
   },
+
+  "plugins": {
+    "media": {
+      "video": true,
+      "audio": false
+    }
+  },
+
   "bundle": {
     "active": true,
     "targets": "all",
