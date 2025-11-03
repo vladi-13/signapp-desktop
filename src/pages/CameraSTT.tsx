@@ -7,6 +7,7 @@ export default function CameraSTT() {
   const [history, setHistory] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [backendAlive, setBackendAlive] = useState<boolean | null>(null);
+  const [finalTranslation, setFinalTranslation] = useState<string>(""); // ← NUEVO
 
   const runningRef = useRef(false);
 
@@ -31,6 +32,7 @@ export default function CameraSTT() {
       setTranscript("Pausado");
       setFrame("");
       setHistory([]);
+      setFinalTranslation(""); // ← limpiar al pausar
       return;
     }
 
@@ -58,12 +60,21 @@ export default function CameraSTT() {
     const next = !running;
     setRunning(next);
     runningRef.current = next;
-    await fetch(next ? "http://127.0.0.1:8000/start" : "http://127.0.0.1:8000/stop");
+
+    const endpoint = next ? "start" : "stop";
+    const res = await fetch(`http://127.0.0.1:8000/${endpoint}`);
+
+    if (!next) {
+      // Solo al detener
+      const data = await res.json();
+      setFinalTranslation(data.traduccion_refinada || "");
+    }
   };
 
   const clear = async () => {
     await fetch("http://127.0.0.1:8000/clear");
     setHistory([]);
+    setFinalTranslation("");
   };
 
   return (
@@ -82,7 +93,7 @@ export default function CameraSTT() {
             )}
           </div>
 
-          <div className="mt-4 flex gap-3">
+          <div className="mt-4 flex flex-wrap gap-3 items-center">
             <button
               onClick={toggle}
               className={`px-4 py-2 rounded-xl text-white font-medium ${
@@ -97,7 +108,24 @@ export default function CameraSTT() {
             >
               Limpiar
             </button>
-            <div className="text-xs text-slate-500 flex items-center">
+
+            {/* HISTORIAL DE PALABRAS (solo mientras corre) */}
+            {running && history.length > 0 && (
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-slate-600 truncate">
+                  {history.map((h, i) => (
+                    <span key={i}>
+                      {i > 0 && " → "}
+                      <span className="font-medium text-slate-800">
+                        {h.split(" (")[0]}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="text-xs text-slate-500">
               Backend: {backendAlive === null ? "..." : backendAlive ? "Conectado" : "Desconectado"}
             </div>
           </div>
@@ -105,17 +133,18 @@ export default function CameraSTT() {
 
         {/* Resultado */}
         <div className="bg-white rounded-2xl shadow-soft p-4 border">
-          <div className="text-sm font-semibold text-slate-700 mb-2">Signo detectado</div>
+          <div className="text-sm font-semibold text-slate-700 mb-2">Traducción final</div>
           <div className="min-h-[200px] rounded-xl border bg-slate-50 p-4 text-slate-700 text-lg font-medium">
-            <div className="font-bold text-green-600">{transcript}</div>
-            {history.length > 1 && (
-              <div className="text-sm text-slate-600 mt-3">
-                {history.join(" → ")}
+            {finalTranslation ? (
+              <div className="text-green-600 font-bold">{finalTranslation}</div>
+            ) : (
+              <div className="text-slate-500 italic">
+                {running ? "Detectando..." : "Presiona 'Iniciar' para comenzar"}
               </div>
             )}
           </div>
           <div className="mt-2 text-[10px] text-slate-400">
-            * Reconocimiento en tiempo real con MediaPipe + LSTM (Python)
+            * Traducción refinada con T5 + Gemini (LSB → Español Boliviano)
           </div>
         </div>
       </div>
