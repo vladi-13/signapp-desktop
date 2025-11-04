@@ -2,12 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 
 export default function CameraSTT() {
-  const [transcript, setTranscript] = useState<string>("Pausado");
+  const [transcript, setTranscript] = useState<React.ReactNode>("Pausado");
   const [frame, setFrame] = useState<string>("");
   const [history, setHistory] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [backendAlive, setBackendAlive] = useState<boolean | null>(null);
-  const [finalTranslation, setFinalTranslation] = useState<string>(""); // ← NUEVO
+  const [finalTranslation, setFinalTranslation] = useState<string>("");
 
   const runningRef = useRef(false);
 
@@ -32,7 +32,7 @@ export default function CameraSTT() {
       setTranscript("Pausado");
       setFrame("");
       setHistory([]);
-      setFinalTranslation(""); // ← limpiar al pausar
+      setFinalTranslation("");
       return;
     }
 
@@ -43,9 +43,26 @@ export default function CameraSTT() {
           const res = await fetch("http://127.0.0.1:8000/current");
           const data = await res.json();
 
-          setTranscript(data.text || "Pausado");
+          // --- SEÑA ACTUAL + % ---
+          const cleanText = data.current?.clean_text || "Pausado";
+          const probPercent = data.current?.prob_percent || "0.0%";
+          const isHigh = (data.current?.prob || 0) >= 0.7;
+
+          setTranscript(
+            <span>
+              <span className="font-bold">{cleanText}</span>{" "}
+              <span className={isHigh ? "text-green-600" : "text-orange-600"}>
+                ({probPercent})
+              </span>
+            </span>
+          );
+
+          // --- FRAME ---
           setFrame(data.frame ? `data:image/jpeg;base64,${data.frame}` : "");
+
+          // --- HISTORIAL: Usar el string ya formateado ---
           setHistory(data.history || []);
+
         } catch (err) {
           console.error("Polling error:", err);
         }
@@ -65,9 +82,8 @@ export default function CameraSTT() {
     const res = await fetch(`http://127.0.0.1:8000/${endpoint}`);
 
     if (!next) {
-      // Solo al detener
       const data = await res.json();
-      setFinalTranslation(data.traduccion_refinada || "");
+      setFinalTranslation(data.traduccion_refinada || "No se detectó nada.");
     }
   };
 
@@ -82,7 +98,9 @@ export default function CameraSTT() {
       <div className="grid md:grid-cols-2 gap-6">
         {/* Video */}
         <div className="bg-white rounded-2xl shadow-soft p-4 border">
-          <div className="text-sm font-semibold text-slate-700 mb-2">Cámara (procesada por backend)</div>
+          <div className="text-sm font-semibold text-slate-700 mb-2">
+            Cámara (procesada por backend)
+          </div>
           <div className="aspect-video bg-slate-100 rounded-xl overflow-hidden">
             {frame ? (
               <img src={frame} className="w-full h-full object-cover" />
@@ -109,18 +127,24 @@ export default function CameraSTT() {
               Limpiar
             </button>
 
-            {/* HISTORIAL DE PALABRAS (solo mientras corre) */}
+            {/* HISTORIAL (solo mientras corre) */}
             {running && history.length > 0 && (
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-slate-600 truncate">
-                  {history.map((h, i) => (
-                    <span key={i}>
-                      {i > 0 && " → "}
-                      <span className="font-medium text-slate-800">
-                        {h.split(" (")[0]}
+                  {history.map((h, i) => {
+                    const [word, prob] = h.split(" (");
+                    const probValue = parseFloat(prob?.replace("%)", "") || "0");
+                    const isHigh = probValue >= 70;
+                    return (
+                      <span key={i}>
+                        {i > 0 && " → "}
+                        <span className={`font-medium ${isHigh ? "text-green-600" : "text-orange-600"}`}>
+                          {word.replace("_recortados_auto", "")}
+                        </span>
+                        <span className="text-slate-500"> ({prob}</span>
                       </span>
-                    </span>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -129,11 +153,21 @@ export default function CameraSTT() {
               Backend: {backendAlive === null ? "..." : backendAlive ? "Conectado" : "Desconectado"}
             </div>
           </div>
+
+          {/* SEÑA ACTUAL EN GRANDE */}
+          <div className="mt-4 p-3 bg-slate-50 rounded-xl text-center">
+            <div className="text-sm text-slate-600 mb-1">Seña detectada</div>
+            <div className="text-xl font-bold text-slate-800">
+              {transcript}
+            </div>
+          </div>
         </div>
 
         {/* Resultado */}
         <div className="bg-white rounded-2xl shadow-soft p-4 border">
-          <div className="text-sm font-semibold text-slate-700 mb-2">Traducción final</div>
+          <div className="text-sm font-semibold text-slate-700 mb-2">
+            Traducción final
+          </div>
           <div className="min-h-[200px] rounded-xl border bg-slate-50 p-4 text-slate-700 text-lg font-medium">
             {finalTranslation ? (
               <div className="text-green-600 font-bold">{finalTranslation}</div>
